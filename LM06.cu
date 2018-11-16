@@ -1,3 +1,4 @@
+#include <iomanip>
 #include <iostream>
 
 using namespace std;
@@ -6,11 +7,16 @@ using namespace std;
 //Performs matrix multiplication A * B = Out
 //Note that aWidth must equal bHeight for the multiplication to succeed
 //Thus we have summarily done away with the latter to remove temptation
+//This kernel assumes that A is row major and B is column major
 __global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixOut, int aHeight, 
                                 int aWidth, int bWidth) {
-    int row = blockIdx.x * blockDim.x + threadIdx.x;
-    int col = blockIdx.y * blockDim.y + threadIdx.y;
-    int tid = gridDim.x * gridDim.y * blockIdx.x * blockDim.x * blockDim.y + threadIdx.x;
+    int blockNumber = blockIdx.y * gridDim.x + blockIdx.x;
+    int offsetIntoBlock = threadIdx.y * blockDim.x + threadIdx.x;
+    int tid = blockNumber + offsetIntoBlock;
+
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    
     double sum = 0;
     // check to see if we are inside our problem space
     if (tid < aHeight * bWidth) {
@@ -38,7 +44,7 @@ void fillMatrix(double *target, int targetSize) {
 void printMatrixRowMaj(double *target, int numRows, int numCols) {
     for (int row = 0; row < numRows; row++) {
         for (int col = 0; col < numCols; col++) {
-            std::cout << *(target + row * numCols + col) << " ";
+            std::cout << std::setw(7) << *(target + row * numCols + col) << " ";
         }
         std::cout << std::endl;
     }
@@ -48,7 +54,7 @@ void printMatrixRowMaj(double *target, int numRows, int numCols) {
 void printMatrixColMaj(double *target, int numRows, int numCols) {
     for (int row = 0; row < numRows; row++) {
         for (int col = 0; col < numCols; col++) {
-            std::cout << *(target + col * numRows + row) << " ";
+            std::cout << std::setw(7) << *(target + col * numRows + row) << " ";
         }
         std::cout << std::endl;
     }
@@ -56,10 +62,10 @@ void printMatrixColMaj(double *target, int numRows, int numCols) {
 }
 
 int main() {
-    int aHeight = 3;    //num of rows in A
+    int aHeight = 9;    //num of rows in A
     int aWidth = 2;     //num of cols in A
     int bHeight = 2;    //num of rows in B - this must be the same as aWidth for AB to work
-    int bWidth = 3;     //num of cols in B
+    int bWidth = 9;     //num of cols in B
     double *dev_matrixA, *dev_matrixB, *dev_matrixOut;
     cudaEvent_t start, stop;
     float milliseconds; //how long did we take to do things?
@@ -75,7 +81,7 @@ int main() {
     fillMatrix(matrixA, aHeight * aWidth);
     fillMatrix(matrixB, bHeight * bWidth);
 
-    //setup memory shit
+    //setup memory on device
     cudaMalloc((void**)&dev_matrixA, (aHeight * aWidth) * sizeof(double));
     cudaMalloc((void**)&dev_matrixB, (bHeight * bWidth) * sizeof(double));
     cudaMalloc((void**)&dev_matrixOut, (aHeight * bWidth) * sizeof(double));
@@ -88,16 +94,18 @@ int main() {
     cudaMemcpy(dev_matrixB, matrixB, bHeight * bWidth * sizeof(double), cudaMemcpyHostToDevice);
     cudaMemcpy(dev_matrixOut, matrixOut, aHeight * bWidth * sizeof(double), cudaMemcpyHostToDevice);
 
+    //Set up problem space dimensions
+    //dim3 threadsPerBlock (bWidth, aHeight);
+    dim3 threadsPerBlock (32, 32);
+    dim3 blocks (1, 1);
     //start timer event
     cudaEventRecord(start);
     //call kernel
-    dim3 threadsPerBlock (1, 32);
-    dim3 blocks (32, 32);
     matrixMultiply<<<1,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
     //stop timer event
     cudaEventRecord(stop);
 
-    //get result
+    //get result from device
     cudaMemcpy(matrixOut, dev_matrixOut, aHeight * bWidth * sizeof(double), cudaMemcpyDeviceToHost);
     
     //calculate time
@@ -109,6 +117,7 @@ int main() {
     cudaFree(dev_matrixB);
     cudaFree(dev_matrixOut);
 
+    //Test our calculation
     printMatrixRowMaj(matrixA, aHeight, aWidth);
     printMatrixColMaj(matrixB, bHeight, bWidth);
     printMatrixRowMaj(matrixOut, aHeight, bWidth);
