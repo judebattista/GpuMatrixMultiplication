@@ -8,17 +8,22 @@ using namespace std;
 //Note that aWidth must equal bHeight for the multiplication to succeed
 //Thus we have summarily done away with the latter to remove temptation
 //This kernel assumes that A is row major and B is column major
-__global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixOut, int aHeight, 
-                                int aWidth, int bWidth) {
+__global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixOut, 
+                                int aHeight, int aWidth, int bWidth) {
+    /* This tid calculation should be identical to the one below
     int blockNumber = blockIdx.y * gridDim.x + blockIdx.x;
+    int blockSize = blockDim.x * blockDim.y;
     int offsetIntoBlock = threadIdx.y * blockDim.x + threadIdx.x;
-    int tid = blockNumber + offsetIntoBlock;
+    int tid = blockNumber * blockSize + offsetIntoBlock;
+    */
 
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    
+    tid = row * blockDim.x * gridDim.x + col;
+ 
     double sum = 0;
     // check to see if we are inside our problem space
+    //if (tid < 81) {
     if (tid < aHeight * bWidth) {
         // calculate row and col that we are going to compute
         // loop over A & B at the same time since A is row major and B is column major
@@ -96,8 +101,8 @@ int main() {
 
     //Set up problem space dimensions
     //dim3 threadsPerBlock (bWidth, aHeight);
-    dim3 threadsPerBlock (32, 32);
-    dim3 blocks (1, 1);
+    dim3 threadsPerBlock (3, 3);
+    dim3 blocks (3, 3);
     //start timer event
     cudaEventRecord(start);
     //call kernel
@@ -107,7 +112,7 @@ int main() {
 
     //get result from device
     cudaMemcpy(matrixOut, dev_matrixOut, aHeight * bWidth * sizeof(double), cudaMemcpyDeviceToHost);
-    
+     
     //calculate time
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
