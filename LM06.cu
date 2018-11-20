@@ -20,6 +20,29 @@ __global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixO
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     tid = row * blockDim.x * gridDim.x + col;
+    
+    //Scott Comment: I am not sure this is correct.
+    //Lets do this long hand:
+    /*
+        Using:     dim3 threadsPerBlock (3, 3); dim3 blocks (3, 3);
+        blockIdx.y * blockDim.y + threadIdx.y;
+        (0-2)      * 3          + 0-2
+        0-6 + 0-2
+        row: 0-8 //Those make sense
+        col: 0-8 
+
+        tid = row * blockDim.x * gridDim.x + col;
+              0-8 * 3*3  + 0-8
+              0-8 * 9    + 0-8
+              0-72 + 0-8
+              0-80
+    
+        AH... ok, I get it. That is a little different than I would think about it, but ok.
+        tid is going to be a tid for the output array. Specifically counting through:
+        0  1  2  3  4  5  6  7  8
+        9 10 11 12 13 14 15 16 17...
+    */
+    //End Scott Comment
  
     double sum = 0;
     // check to see if we are inside our problem space
@@ -28,13 +51,13 @@ __global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixO
         // calculate row and col that we are going to compute
         // loop over A & B at the same time since A is row major and B is column major
         for (int ndx = 0; ndx < aWidth; ndx++) {
-            double lhs = *(matrixA + row*aWidth + ndx);
+            double lhs = *(matrixA + row*aWidth + ndx); //Scott Comment: matrixA[row*aWidth + ndx] Ok, so this means that A is the matrix on the 'left' I would double check that these are the 'orientation' you are looking for.
             double rhs = *(matrixB + col*aWidth + ndx);
             //Accumulate result
             sum += lhs * rhs; 
         }
         // store in matrix
-        *(matrixOut + tid) = sum;
+        *(matrixOut + tid) = sum;  //Scott comment: matrixOut[tid] = sum  You can test this be outputting tid and row and col. You should get predictable arrays work from there
     }
     
 }
