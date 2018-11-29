@@ -20,13 +20,13 @@ __global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixO
         // calculate row and col that we are going to compute
         // loop over A & B at the same time since A is row major and B is column major
         for (int ndx = 0; ndx < aWidth; ndx++) {
-            double lhs = *(matrixA + row*aWidth + ndx); //Scott Comment: matrixA[row*aWidth + ndx] Ok, so this means that A is the matrix on the 'left' I would double check that these are the 'orientation' you are looking for.
+            double lhs = *(matrixA + row*aWidth + ndx); 
             double rhs = *(matrixB + col*aWidth + ndx);
             //Accumulate result
             sum += lhs * rhs; 
         }
         // store in matrix
-        *(matrixOut + tid) = sum;  //Scott comment: matrixOut[tid] = sum  You can test this be outputting tid and row and col. You should get predictable arrays work from there
+        *(matrixOut + tid) = sum; 
     }
     
 }
@@ -36,24 +36,42 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = row * bWidth + col;
-    __shared__ int sharedA[32][32];
-    __shared__ int sharedB[32][32];
+    const int sharedWidth = 32;
+    //__shared__ double sharedA[32][32];
+    //__shared__ double sharedB[32][32];
 
+    //__shared__ double* sharedA = (double * )malloc(sizeof (double) * 32 * 32);
+    //__shared__ double* sharedB = (double * )malloc(sizeof (double) * 32 * 32);
+
+    __shared__ double sharedA[sharedWidth * sharedWidth];
+    __shared__ double sharedB[sharedWidth * sharedWidth];
+    
+    //TODO: 
+    //Replace index math to work with multiple blocks.
+    //aWidth needs to go. Needs to work in chunks of 32
+    //*(sharedA + row * sharedWidth + col) = *(matrixA + row * sharedWidth + col);
+    //*(sharedB + row * sharedWidth + col) = *(matrixB + row * sharedWidth + col); //Note: aWidth = bHeight
     sharedA[row][col] = *(matrixA + row * aWidth + col);
+    sharedA[row][col] = *(matrixA + row * aWidth + col);
+    __syncthreads();
 
     double sum = 0;
+    double lhs = 0;
+    double rhs = 0;
     // check to see if we are inside our problem space
     if (row < aHeight && col < bWidth) {
         // calculate row and col that we are going to compute
         // loop over A & B at the same time since A is row major and B is column major
         for (int ndx = 0; ndx < aWidth; ndx++) {
-            double lhs = *(matrixA + row*aWidth + ndx); //Scott Comment: matrixA[row*aWidth + ndx] Ok, so this means that A is the matrix on the 'left' I would double check that these are the 'orientation' you are looking for.
-            double rhs = *(matrixB + col*aWidth + ndx);
+            //double lhs = *(matrixA + row*aWidth + ndx); 
+            //double rhs = *(matrixB + col*aWidth + ndx);
+            lhs = *(sharedA + row*sharedWidth + ndx);
+            lhs = *(sharedB + row*sharedWidth + ndx);
             //Accumulate result
             sum += lhs * rhs; 
         }
         // store in matrix
-        *(matrixOut + tid) = sum;  //Scott comment: matrixOut[tid] = sum  You can test this be outputting tid and row and col. You should get predictable arrays work from there
+        *(matrixOut + tid) = sum;
     }
 
 }
@@ -86,15 +104,15 @@ void printMatrixColMaj(double *target, int numRows, int numCols) {
 }
 
 int main() {
-    int aHeight = 9;    //num of rows in A
-    const int aWidth = 32;     //num of cols in A
-    const int bHeight = 32;    //num of rows in B - this must be the same as aWidth for AB to work
-    int bWidth = 9;     //num of cols in B
+    int aHeight = 4;    //num of rows in A
+    const int aWidth = 4;     //num of cols in A
+    const int bHeight = 4;    //num of rows in B - this must be the same as aWidth for AB to work
+    int bWidth = 4;     //num of cols in B
     double *dev_matrixA, *dev_matrixB, *dev_matrixOut;
     cudaEvent_t start, stop;
     float milliseconds; //how long did we take to do things?
 
-    bHeight = aWidth;   //Let's just make sure
+    //bHeight = aWidth;   //Let's just make sure
 
     //allocate space
     double* matrixA = (double * )malloc(sizeof (double) * aHeight * aWidth);
@@ -120,12 +138,13 @@ int main() {
 
     //Set up problem space dimensions
     //dim3 threadsPerBlock (bWidth, aHeight);
-    dim3 threadsPerBlock (3, 3);
-    dim3 blocks (3, 3);
+    dim3 threadsPerBlock (32, 32);
+    dim3 blocks (1, 1);
     //start timer event
     cudaEventRecord(start);
     //call kernel
-    matrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
+    //matrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
+    sharedMatrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
     //stop timer event
     cudaEventRecord(stop);
 
