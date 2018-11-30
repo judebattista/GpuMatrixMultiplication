@@ -40,8 +40,6 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     int tid = row * bWidth + col;
     const int sharedWidth = 32;
     const int sharedHeight = 32;
-    //__shared__ double sharedA[32][32];
-    //__shared__ double sharedB[32][32];
 
     __shared__ double sharedA[sharedWidth * sharedHeight];
     __shared__ double sharedB[sharedWidth * sharedHeight];
@@ -49,10 +47,8 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     //TODO: 
     //Replace index math to work with multiple blocks.
     //aWidth needs to go. Needs to work in chunks of 32
-    *(sharedA + row * sharedWidth + col) = *(matrixA + row * sharedWidth + col);
-    *(sharedB + row * sharedWidth + col) = *(matrixB + row * sharedWidth + col); //Note: aWidth = bHeight
-    //sharedA[row][col] = *(matrixA + row * aWidth + col);
-    //sharedA[row][col] = *(matrixA + row * aWidth + col);
+    *(sharedA + row * sharedWidth + col) = *(matrixA + row * aWidth + col);
+    *(sharedB + row * sharedWidth + col) = *(matrixB + row * aWidth + col); //Note: aWidth = bHeight
     __syncthreads();
 
     for(int ndx = 0; ndx < sharedHeight * sharedWidth; ndx++) {
@@ -70,8 +66,6 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
         for (int ndx = 0; ndx < aWidth; ndx++) {
             lhs = *(sharedA + row*aWidth + ndx);
             rhs = *(sharedB + col*aWidth + ndx);
-            //lhs = 1;
-            //rhs = 1;
             //Accumulate result
             sum += lhs * rhs; 
         }
@@ -148,8 +142,8 @@ int main() {
 
     //Set up problem space dimensions
     //dim3 threadsPerBlock (bWidth, aHeight);
-    dim3 threadsPerBlock (32, 32);
-    dim3 blocks (1, 1);
+    dim3 threadsPerBlock (2, 2);
+    dim3 blocks (2, 2);
     //start timer event
     cudaEventRecord(start);
     //call kernel
