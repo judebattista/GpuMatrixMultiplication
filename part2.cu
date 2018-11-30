@@ -47,6 +47,7 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     //TODO: 
     //Replace index math to work with multiple blocks.
     //aWidth needs to go. Needs to work in chunks of 32
+    //Calculate which shared block we are in based on sharedWidth
     *(sharedA + row * sharedWidth + col) = *(matrixA + row * aWidth + col);
     *(sharedB + row * sharedWidth + col) = *(matrixB + row * aWidth + col); //Note: aWidth = bHeight
     __syncthreads();
