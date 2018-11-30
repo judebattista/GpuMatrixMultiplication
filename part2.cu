@@ -32,28 +32,33 @@ __global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixO
 }
 
 __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* matrixOut, 
-        int aHeight, int aWidth, int bWidth) {
+        int aHeight, int aWidth, int bWidth,
+        double* sharedTestA, double* sharedTestB) {
+    
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = row * bWidth + col;
     const int sharedWidth = 32;
+    const int sharedHeight = 32;
     //__shared__ double sharedA[32][32];
     //__shared__ double sharedB[32][32];
 
-    //__shared__ double* sharedA = (double * )malloc(sizeof (double) * 32 * 32);
-    //__shared__ double* sharedB = (double * )malloc(sizeof (double) * 32 * 32);
-
-    __shared__ double sharedA[sharedWidth * sharedWidth];
-    __shared__ double sharedB[sharedWidth * sharedWidth];
+    __shared__ double sharedA[sharedWidth * sharedHeight];
+    __shared__ double sharedB[sharedWidth * sharedHeight];
     
     //TODO: 
     //Replace index math to work with multiple blocks.
     //aWidth needs to go. Needs to work in chunks of 32
-    //*(sharedA + row * sharedWidth + col) = *(matrixA + row * sharedWidth + col);
-    //*(sharedB + row * sharedWidth + col) = *(matrixB + row * sharedWidth + col); //Note: aWidth = bHeight
-    sharedA[row][col] = *(matrixA + row * aWidth + col);
-    sharedA[row][col] = *(matrixA + row * aWidth + col);
+    *(sharedA + row * sharedWidth + col) = *(matrixA + row * sharedWidth + col);
+    *(sharedB + row * sharedWidth + col) = *(matrixB + row * sharedWidth + col); //Note: aWidth = bHeight
+    //sharedA[row][col] = *(matrixA + row * aWidth + col);
+    //sharedA[row][col] = *(matrixA + row * aWidth + col);
     __syncthreads();
+
+    for(int ndx = 0; ndx < sharedHeight * sharedWidth; ndx++) {
+        *(sharedTestA + ndx) = *(sharedA + ndx);
+        *(sharedTestB + ndx) = *(sharedB + ndx);
+    }
 
     double sum = 0;
     double lhs = 0;
@@ -63,10 +68,10 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
         // calculate row and col that we are going to compute
         // loop over A & B at the same time since A is row major and B is column major
         for (int ndx = 0; ndx < aWidth; ndx++) {
-            //double lhs = *(matrixA + row*aWidth + ndx); 
-            //double rhs = *(matrixB + col*aWidth + ndx);
-            lhs = *(sharedA + row*sharedWidth + ndx);
-            lhs = *(sharedB + row*sharedWidth + ndx);
+            lhs = *(sharedA + row*aWidth + ndx);
+            rhs = *(sharedB + col*aWidth + ndx);
+            //lhs = 1;
+            //rhs = 1;
             //Accumulate result
             sum += lhs * rhs; 
         }
@@ -108,7 +113,7 @@ int main() {
     const int aWidth = 4;     //num of cols in A
     const int bHeight = 4;    //num of rows in B - this must be the same as aWidth for AB to work
     int bWidth = 4;     //num of cols in B
-    double *dev_matrixA, *dev_matrixB, *dev_matrixOut;
+    double *dev_matrixA, *dev_matrixB, *dev_matrixOut, *dev_sharedA, *dev_sharedB;
     cudaEvent_t start, stop;
     float milliseconds; //how long did we take to do things?
 
@@ -118,6 +123,9 @@ int main() {
     double* matrixA = (double * )malloc(sizeof (double) * aHeight * aWidth);
     double* matrixB = (double * )malloc(sizeof (double) * bHeight * bWidth);        //The operand matrices
     double* matrixOut = (double * )malloc(sizeof (double) * aHeight * bWidth);      //The result matrix
+    double* sharedA = (double * )malloc(sizeof (double) * 1024);      //The result matrix
+    double* sharedB = (double * )malloc(sizeof (double) * 1024);      //The result matrix
+
 
     //fill operands
     fillMatrix(matrixA, aHeight * aWidth);
@@ -127,6 +135,8 @@ int main() {
     cudaMalloc((void**)&dev_matrixA, (aHeight * aWidth) * sizeof(double));
     cudaMalloc((void**)&dev_matrixB, (bHeight * bWidth) * sizeof(double));
     cudaMalloc((void**)&dev_matrixOut, (aHeight * bWidth) * sizeof(double));
+    cudaMalloc((void**)&dev_sharedA, (1024) * sizeof(double));
+    cudaMalloc((void**)&dev_sharedB, (1024) * sizeof(double));
 
     // https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/
     cudaEventCreate(&start);
@@ -144,12 +154,14 @@ int main() {
     cudaEventRecord(start);
     //call kernel
     //matrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
-    sharedMatrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
+    sharedMatrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth, dev_sharedA, dev_sharedB);
     //stop timer event
     cudaEventRecord(stop);
 
     //get result from device
     cudaMemcpy(matrixOut, dev_matrixOut, aHeight * bWidth * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(sharedA, dev_sharedA, 16 * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(sharedB, dev_sharedB,  16 * sizeof(double), cudaMemcpyDeviceToHost);
      
     //calculate time
     cudaEventSynchronize(stop);
@@ -159,11 +171,15 @@ int main() {
     cudaFree(dev_matrixA);
     cudaFree(dev_matrixB);
     cudaFree(dev_matrixOut);
+    cudaFree(sharedA);
+    cudaFree(sharedB);
 
     //Test our calculation
     printMatrixRowMaj(matrixA, aHeight, aWidth);
     printMatrixColMaj(matrixB, bHeight, bWidth);
     printMatrixRowMaj(matrixOut, aHeight, bWidth);
+    printMatrixRowMaj(sharedA, 4, 4);
+    printMatrixColMaj(sharedB, 4, 4);
 
 
 
