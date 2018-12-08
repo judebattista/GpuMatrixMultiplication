@@ -43,20 +43,15 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
 
     __shared__ double sharedA[sharedWidth * sharedHeight];
     __shared__ double sharedB[sharedWidth * sharedHeight];
-    
-    //Calculate where this block begins as an offset into A or B assuming widthA = sharedWidth
-    //Take the size of a shared block, multiply it by how far down we are to get the index at which we want to start copying into sharedA
-    int startCopyIndexA = sharedWidth * sharedHeight * blockIdx.y + ;
-    //To that offset, we need to add how far into the block the thread is located
-    //Multiply how many rows down into the block we are by the number of threads per row, then add how far we are into the current row
-    int threadOffsetA = blockDim.x * threadIdx.y + threadIdx.x;
-    int sharedTidA = startCopyIndexA + threadOffsetA;
+   
+    //figure out which rows of A and columns of B need to be loaded into the shared memory
+    //This should be based off the TID for the output matrix
+    //If we're in the first row of the output matrix, we need the first row of A
+    //If we're in the first column of the output matrix, we need the first column of B
+    //This correspondence seems to hold over the output space
+    //The size of our block determines how many rows and columns we need to hold
+      
 
-    //for B
-
-
-    //Calculate which row and column we should be working with in our shared matrix. Since each thread needs to copy a value into each matrix,
-    //we can use the same row and column for both sharedA and sharedB
      
 
     //TODO: 
