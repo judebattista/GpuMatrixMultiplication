@@ -35,11 +35,12 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
         int aHeight, int aWidth, int bWidth,
         double* sharedTestA, double* sharedTestB) {
     
+    //Row and column of the output space
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = row * bWidth + col;
-    const int sharedWidth = 32;
-    const int sharedHeight = 32;
+    const int sharedWidth = 2;
+    const int sharedHeight = 2;
 
     __shared__ double sharedA[sharedWidth * sharedHeight];
     __shared__ double sharedB[sharedWidth * sharedHeight];
@@ -50,21 +51,16 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     //If we're in the first column of the output matrix, we need the first column of B
     //This correspondence seems to hold over the output space
     //The size of our block determines how many rows and columns we need to hold
-      
-
+    //For block 0,1 it needs to draw from the first set of rows and the second set of columns      
      
-
-    //TODO: 
-    //Replace index math to work with multiple blocks.
-    //aWidth needs to go. Needs to work in chunks of 32
-    //Calculate which shared block we are in based on sharedWidth
-    *(sharedA + row * sharedWidth + col) = *(matrixA + row * aWidth + col);
-    *(sharedB + row * sharedWidth + col) = *(matrixB + row * aWidth + col); //Note: aWidth = bHeight
+    //Each thread should load a single element from A and a single element from B into shared memory
+    //The index into A/B is found by:
+    //Shared dimensions are NOT the same as block dimensions
+    int sharedCol = threadIdx.x;
+    int sharedRow = threadIdx.y;
+    *(sharedA + sharedRow * sharedWidth + sharedCol) = *(matrixA + row*aWidth + col); 
+    *(sharedB + sharedRow * sharedWidth + sharedCol) = *(matrixB + row*aWidth + col);
     __syncthreads();
-
-    //Calculate which shared block our TID is in
-    sharedBlockIdx = blockIdx.x;
-    sharedBlockIdy = blockIdx.y;
 
     for(int ndx = 0; ndx < sharedHeight * sharedWidth; ndx++) {
         *(sharedTestA + ndx) = *(sharedA + ndx);
@@ -74,13 +70,16 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     double sum = 0;
     double lhs = 0;
     double rhs = 0;
+    //TODO: CHECK YOUR SHARED MEMORY DIMENSIONS!
     // check to see if we are inside our problem space
     if (row < aHeight && col < bWidth) {
         // calculate row and col that we are going to compute
         // loop over A & B at the same time since A is row major and B is column major
-        for (int ndx = 0; ndx < aWidth; ndx++) {
-            lhs = *(sharedA + row*aWidth + ndx);
-            rhs = *(sharedB + col*aWidth + ndx);
+        for (int ndx = 0; ndx < sharedWidth; ndx++) {
+            lhs = *(sharedA + sharedRow*sharedWidth + ndx);
+            //rhs = *(sharedB + sharedCol*sharedWidth + ndx);
+            //TODO: Using the identity matrix as the RHS
+            rhs = 1;
             //Accumulate result
             sum += lhs * rhs; 
         }
@@ -118,10 +117,10 @@ void printMatrixColMaj(double *target, int numRows, int numCols) {
 }
 
 int main() {
-    int aHeight = 4;    //num of rows in A
+    int aHeight = 8;    //num of rows in A
     const int aWidth = 4;     //num of cols in A
     const int bHeight = 4;    //num of rows in B - this must be the same as aWidth for AB to work
-    int bWidth = 4;     //num of cols in B
+    int bWidth = 8;     //num of cols in B
     double *dev_matrixA, *dev_matrixB, *dev_matrixOut, *dev_sharedA, *dev_sharedB;
     cudaEvent_t start, stop;
     float milliseconds; //how long did we take to do things?
@@ -157,8 +156,8 @@ int main() {
 
     //Set up problem space dimensions
     //dim3 threadsPerBlock (bWidth, aHeight);
-    dim3 threadsPerBlock (2, 2);
-    dim3 blocks (2, 2);
+    dim3 threadsPerBlock (4, 4);
+    dim3 blocks (8, 8);
     //start timer event
     cudaEventRecord(start);
     //call kernel
@@ -187,8 +186,8 @@ int main() {
     printMatrixRowMaj(matrixA, aHeight, aWidth);
     printMatrixColMaj(matrixB, bHeight, bWidth);
     printMatrixRowMaj(matrixOut, aHeight, bWidth);
-    printMatrixRowMaj(sharedA, 4, 4);
-    printMatrixColMaj(sharedB, 4, 4);
+    printMatrixRowMaj(sharedA, 2, 2);
+    printMatrixColMaj(sharedB, 2, 2);
 
 
 
