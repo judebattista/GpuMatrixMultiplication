@@ -55,7 +55,7 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
      
     //Each thread should load a single element from A and a single element from B into shared memory
     //The index into A/B is found by:
-    //Shared dimensions are NOT the same as block dimensions
+    //Shared dimensions are NOT the same as block dimensions - should they be?
     int sharedCol = threadIdx.x;
     int sharedRow = threadIdx.y;
     *(sharedA + sharedRow * sharedWidth + sharedCol) = *(matrixA + row*aWidth + col); 
@@ -117,10 +117,10 @@ void printMatrixColMaj(double *target, int numRows, int numCols) {
 }
 
 int main() {
-    int aHeight = 8;    //num of rows in A
-    const int aWidth = 4;     //num of cols in A
-    const int bHeight = 4;    //num of rows in B - this must be the same as aWidth for AB to work
-    int bWidth = 8;     //num of cols in B
+    int aHeight = 4;    //num of rows in A
+    const int aWidth = 2;     //num of cols in A
+    const int bHeight = 2;    //num of rows in B - this must be the same as aWidth for AB to work
+    int bWidth = 4;     //num of cols in B
     double *dev_matrixA, *dev_matrixB, *dev_matrixOut, *dev_sharedA, *dev_sharedB;
     cudaEvent_t start, stop;
     float milliseconds; //how long did we take to do things?
@@ -156,8 +156,8 @@ int main() {
 
     //Set up problem space dimensions
     //dim3 threadsPerBlock (bWidth, aHeight);
-    dim3 threadsPerBlock (4, 4);
-    dim3 blocks (8, 8);
+    dim3 threadsPerBlock (2, 2);
+    dim3 blocks (2, 1);
     //start timer event
     cudaEventRecord(start);
     //call kernel
