@@ -31,6 +31,21 @@ __global__ void matrixMultiply(double *matrixA, double *matrixB, double* matrixO
     
 }
 
+//CUDA Kernel using shared memory to speed things up.
+//Performs matrix multiplication A * B = Out
+//Note that aWidth must equal bHeight for the multiplication to succeed
+//Thus we have summarily done away with the latter to remove temptation
+//This kernel assumes that A is row major and B is column major
+//Further the max (and probably optimal) aWidth value is 32.
+
+//While the shared memory version does not currently work, due to issues with indexing into A and B
+//the resultant calculation is still an order of magnitude faster than the naive implementation.
+//How much of this is due to actual efficiency vs busted math (multiplying and adding zeroes instead of values), I am not sure.
+//Averages over ten runs for each set of dimensions
+// 128x128:     .0036 ms    vs. .0540 ms
+// 256x256      .0035 ms    vs. .0590 ms 
+// 1024x1024    .0044 ms    vs. .0880 ms
+// 4096x4096    .0058 ms    vs. .0890 ms <-- I expected the naive kernel to take much longer on this set
 __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* matrixOut, 
         int aHeight, int aWidth, int bWidth,
         double* sharedTestA, double* sharedTestB) {
@@ -39,8 +54,9 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = row * bWidth + col;
-    const int sharedWidth = 2;
-    const int sharedHeight = 2;
+    //These values should correspond to our block size
+    const int sharedWidth = 32;
+    const int sharedHeight = 32;
 
     __shared__ double sharedA[sharedWidth * sharedHeight];
     __shared__ double sharedB[sharedWidth * sharedHeight];
@@ -54,15 +70,15 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
     //For block 0,1 it needs to draw from the first set of rows and the second set of columns      
      
     //Each thread should load a single element from A and a single element from B into shared memory
-    //The index into A/B is found by:
     //Shared dimensions are NOT the same as block dimensions - should they be?
     //Let's assume they are - constraints make this reasonable
     int sharedCol = threadIdx.x;
     int sharedRow = threadIdx.y;
-    //*(sharedA + sharedRow * sharedWidth + sharedCol) = *(matrixA + row*aWidth + col); 
-    //*(sharedB + sharedRow * sharedWidth + sharedCol) = *(matrixB + row*aWidth + col);
-    *(sharedA + sharedRow * sharedWidth + sharedCol) = blockIdx.x;
-    *(sharedB + sharedRow * sharedWidth + sharedCol) = blockIdx.y;
+    *(sharedA + sharedRow * sharedWidth + sharedCol) = *(matrixA + row*aWidth + col); 
+    *(sharedB + sharedRow * sharedWidth + sharedCol) = *(matrixB + row*aWidth + col);
+    //Since the shared memory copy is not working, try something simpler
+    //*(sharedA + sharedRow * sharedWidth + sharedCol) = blockIdx.x;
+    //*(sharedB + sharedRow * sharedWidth + sharedCol) = blockIdx.y;
     __syncthreads();
 
     for(int ndx = 0; ndx < sharedHeight * sharedWidth; ndx++) {
@@ -80,9 +96,9 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
         // loop over A & B at the same time since A is row major and B is column major
         for (int ndx = 0; ndx < sharedWidth; ndx++) {
             lhs = *(sharedA + sharedRow*sharedWidth + ndx);
-            //rhs = *(sharedB + sharedCol*sharedWidth + ndx);
-            //TODO: Using the identity matrix as the RHS
-            rhs = 1;
+            rhs = *(sharedB + sharedCol*sharedWidth + ndx);
+            //TODO: Test using the identity matrix as the RHS
+            //rhs = 1;
             //Accumulate result
             sum += lhs * rhs; 
         }
@@ -94,7 +110,7 @@ __global__ void sharedMatrixMultiply(double *matrixA, double *matrixB, double* m
 
 void fillMatrix(double *target, int targetSize) {
     for (double ndx = 0; ndx < targetSize; ndx += 1) {
-        *target = ndx;
+        *target = (int)ndx % 100;
         target++;
     }
 }
@@ -120,14 +136,16 @@ void printMatrixColMaj(double *target, int numRows, int numCols) {
 }
 
 int main() {
-    int aHeight = 4;    //num of rows in A
-    const int aWidth = 2;     //num of cols in A
-    const int bHeight = 2;    //num of rows in B - this must be the same as aWidth for AB to work
-    int bWidth = 4;     //num of cols in B
+    int aHeight = 4096;    //num of rows in A
+    const int aWidth = 32;     //num of cols in A
+    const int bHeight = 32;    //num of rows in B - this must be the same as aWidth for AB to work
+    int bWidth = 4096;     //num of cols in B
     double *dev_matrixA, *dev_matrixB, *dev_matrixOut, *dev_sharedA, *dev_sharedB;
     cudaEvent_t start, stop;
     float milliseconds; //how long did we take to do things?
-
+    float naiveMs;
+    float sharedMs;
+    
     //bHeight = aWidth;   //Let's just make sure
 
     //allocate space
@@ -159,9 +177,33 @@ int main() {
 
     //Set up problem space dimensions
     //dim3 threadsPerBlock (bWidth, aHeight);
-    dim3 threadsPerBlock (2, 2);
-    dim3 blocks (2, 2);
+    dim3 threadsPerBlock (32, 32);
+    dim3 blocks (1, 4);
     //start timer event
+    cudaEventRecord(start);
+    //call kernel
+    matrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
+    //sharedMatrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth, dev_sharedA, dev_sharedB);
+    //stop timer event
+    cudaEventRecord(stop);
+
+    //get result from device
+    cudaMemcpy(matrixOut, dev_matrixOut, aHeight * bWidth * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(matrixA, dev_matrixA, 16 * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(matrixB, dev_matrixB,  16 * sizeof(double), cudaMemcpyDeviceToHost);
+     
+    //calculate time
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    naiveMs = milliseconds;
+
+    //Test our calculation
+    //printMatrixRowMaj(matrixA, aHeight, aWidth);
+    //printMatrixColMaj(matrixB, bHeight, bWidth);
+    //printMatrixRowMaj(matrixOut, aHeight, bWidth);
+    //printMatrixRowMaj(sharedA, 2, 2);
+    //printMatrixColMaj(sharedB, 2, 2);
+
     cudaEventRecord(start);
     //call kernel
     //matrixMultiply<<<blocks,threadsPerBlock>>>(dev_matrixA, dev_matrixB, dev_matrixOut, aHeight, aWidth, bWidth);
@@ -177,6 +219,7 @@ int main() {
     //calculate time
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&milliseconds, start, stop);
+    sharedMs = milliseconds;
 
     //free memory
     cudaFree(dev_matrixA);
@@ -185,14 +228,8 @@ int main() {
     cudaFree(sharedA);
     cudaFree(sharedB);
 
-    //Test our calculation
-    printMatrixRowMaj(matrixA, aHeight, aWidth);
-    printMatrixColMaj(matrixB, bHeight, bWidth);
-    printMatrixRowMaj(matrixOut, aHeight, bWidth);
-    printMatrixRowMaj(sharedA, 2, 2);
-    printMatrixColMaj(sharedB, 2, 2);
-
-
+    std::cout << "the shared memory version took " << sharedMs << " milliseconds to complete.\n";
+    std::cout << "the naive implementation took " << naiveMs << " milliseconds to complete.\n";
 
     return 0;
 }
